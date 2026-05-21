@@ -19,8 +19,8 @@ afgedekt).
 
 | Bestand | Plek in Dataiku |
 |---|---|
-| `code-env-requirements.txt` | Code env > Packages to install (+ `python -m spacy download nl_core_news_lg`) |
-| `sql/01_schema.sql` | Eenmalig draaien op je PostgreSQL-connectie |
+| `code-env-requirements.txt` | Code env > Packages to install (+ spaCy NL-model als wheel-URL) |
+| `sql/01_schema.sql` | Referentie; tabellen worden automatisch aangemaakt door `db.py` |
 | `python-lib/woo/*.py` | Project > Libraries > python (map `woo/`) |
 | `recipes/recipe_01_intake.py` | Python-recipe, input = folder `00_intake` |
 | `recipes/recipe_02_process.py` | Python-recipe, input = folder `00_intake` |
@@ -30,16 +30,21 @@ afgedekt).
 | `webapp/app.js` | Standard webapp, tab JavaScript |
 | `webapp/style.css` | Standard webapp, tab CSS |
 
-## Eenmalige setup
+> Volg het volledige klik-voor-klik plan in **`docs/STAPPENPLAN.md`**.
 
-1. Maak een **code environment** met `code-env-requirements.txt` en haal het
-   spaCy-model `nl_core_news_lg` op. Voor OCR: zorg dat Tesseract + de `nld`
-   taalpack op de DSS-node staan.
-2. Maak twee **managed folders**: `00_intake` en `90_published`.
-3. Draai `sql/01_schema.sql` op je PostgreSQL.
-4. Zet de DB-URL als **project-variabele** `woo_db_url` (of env `WOO_DB_URL`):
-   `postgresql://gebruiker:wachtwoord@host:5432/dbnaam`
-5. Kopieer `python-lib/woo/` naar de project-library.
+## Eenmalige setup (kort)
+
+1. Maak een **code environment** met `code-env-requirements.txt` en het spaCy
+   NL-model (als wheel-URL, zie `code-env-requirements.txt`). Voor OCR: Tesseract
+   + de `nld` taalpack op de DSS-node.
+2. Maak drie **managed folders** (lokale filesystem): `00_intake`, `90_published`,
+   `woo_state`.
+3. Kopieer `python-lib/woo/` naar de project-library.
+
+De database is standaard **SQLite** (`woo.db` in folder `woo_state`). De tabellen
+worden automatisch aangemaakt; je hoeft `sql/01_schema.sql` niet handmatig te draaien.
+Wil je later een eigen DB-server? Zet dan project-variabele `woo_db_url` op je
+connection-string.
 
 ## Uitvoervolgorde
 
@@ -68,7 +73,10 @@ afgedekt).
 ## Aandachtspunten / mogelijke uitbreidingen
 
 - Netwerkbeleid kan de PDF.js-CDN blokkeren; host `pdf.js` dan zelf.
-- Het uitlezen van een Dataiku SQL-connectie naar credentials kan per versie
-  verschillen — daarom gebruikt `db.py` een expliciete DB-URL via project-variabele.
+- **SQLite** is prima voor één reviewer; bij gelijktijdig schrijven kan
+  `database is locked` optreden. Voor meerdere gebruikers stap je over op een
+  DB-server via project-variabele `woo_db_url` (de code is dialect-agnostisch).
+- De `woo_state`-folder moet op een **lokale filesystem** staan, anders kan
+  `db.py` het pad naar `woo.db` niet bepalen.
 - Toegangsbeheer op de webapp (alleen geautoriseerde behandelaars) en bewaartermijnen
   zijn buiten scope van dit leerproject.

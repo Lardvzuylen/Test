@@ -8,8 +8,11 @@ presidio-analyzer>=2.2
 presidio-anonymizer>=2.2
 spacy>=3.7
 SQLAlchemy>=2.0
-psycopg2-binary>=2.9
 pandas>=1.5
+
+# Standaard wordt SQLite gebruikt (zit in Python; geen extra driver nodig).
+# Alleen nodig als je later een PostgreSQL-server wilt gebruiken:
+# psycopg2-binary>=2.9
 
 # Alleen nodig voor OCR van gescande PDF's (vereist ook systeem-Tesseract + 'nld' taalpack):
 pdf2image>=1.16

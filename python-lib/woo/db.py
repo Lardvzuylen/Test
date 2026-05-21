@@ -1,21 +1,33 @@
-"""Database-helpers voor de operationele status-tabellen (PostgreSQL).
+"""Database-helpers voor de operationele status-tabellen.
 
-De DB-URL wordt gelezen uit (in volgorde):
-  1. Dataiku project-variabele 'woo_db_url'
-  2. omgevingsvariabele WOO_DB_URL
-Formaat: postgresql://gebruiker:wachtwoord@host:5432/databasenaam
+Standaard wordt een lokaal SQLite-bestand 'woo.db' gebruikt in de managed folder
+'woo_state' -- geen database-server, connectie of admin-rechten nodig. De tabellen
+worden bij het eerste gebruik automatisch aangemaakt.
+
+De DB-URL wordt bepaald in deze volgorde:
+  1. Dataiku project-variabele 'woo_db_url'   (optioneel, voor een eigen server)
+  2. omgevingsvariabele WOO_DB_URL            (idem)
+  3. SQLite-bestand in managed folder 'woo_state'  (standaard)
+
+Werkt zowel met SQLite als met PostgreSQL (timestamps gaan als parameter mee, dus
+geen DB-specifieke now()-aanroepen).
 """
 import os
-import json
 import uuid
 import datetime as _dt
 
 from sqlalchemy import create_engine, text
 
+STATE_FOLDER = "woo_state"   # managed folder waarin het SQLite-bestand komt
 _engine = None
 
 
+def _now():
+    return _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _resolve_url():
+    # 1) expliciete override via project-variabele of omgevingsvariabele
     try:
         import dataiku
         variables = dataiku.get_custom_variables() or {}
@@ -23,20 +35,76 @@ def _resolve_url():
             return variables["woo_db_url"]
     except Exception:
         pass
-    url = os.environ.get("WOO_DB_URL")
-    if not url:
+    if os.environ.get("WOO_DB_URL"):
+        return os.environ["WOO_DB_URL"]
+
+    # 2) standaard: SQLite-bestand in de managed folder 'woo_state'
+    try:
+        import dataiku
+        base = dataiku.Folder(STATE_FOLDER).get_path()
+        return "sqlite:///" + os.path.join(base, "woo.db")
+    except Exception as exc:
         raise RuntimeError(
-            "Geen database-URL gevonden. Zet de Dataiku project-variabele "
-            "'woo_db_url' of de omgevingsvariabele WOO_DB_URL, bijv. "
-            "postgresql://user:pw@host:5432/dbnaam"
+            "Kon geen database bepalen. Maak een managed folder '%s' aan op een "
+            "lokale-filesystem-connectie, of zet project-variabele 'woo_db_url'. "
+            "Detail: %s" % (STATE_FOLDER, exc)
         )
-    return url
+
+
+_SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS cases (
+        case_id     TEXT PRIMARY KEY,
+        filename    TEXT NOT NULL,
+        folder_path TEXT NOT NULL UNIQUE,
+        intake_ts   TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'NEW',
+        page_count  INTEGER,
+        used_ocr    INTEGER DEFAULT 0,
+        assigned_to TEXT,
+        updated_ts  TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS redactions (
+        redaction_id TEXT PRIMARY KEY,
+        case_id      TEXT NOT NULL,
+        page_no      INTEGER NOT NULL,
+        nx0 REAL NOT NULL, ny0 REAL NOT NULL, nx1 REAL NOT NULL, ny1 REAL NOT NULL,
+        entity_type  TEXT,
+        text_snippet TEXT,
+        confidence   REAL,
+        source       TEXT NOT NULL DEFAULT 'model',
+        decision     TEXT NOT NULL DEFAULT 'accepted',
+        reviewer     TEXT,
+        decision_ts  TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS audit_log (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts      TEXT NOT NULL,
+        case_id TEXT,
+        actor   TEXT,
+        action  TEXT,
+        details TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_redactions_case ON redactions(case_id)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_case ON audit_log(case_id)",
+]
+
+
+def _init_schema(engine):
+    with engine.begin() as conn:
+        for stmt in _SCHEMA:
+            conn.execute(text(stmt))
 
 
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = create_engine(_resolve_url(), pool_pre_ping=True)
+        url = _resolve_url()
+        kwargs = {"pool_pre_ping": True}
+        if url.startswith("sqlite"):
+            # check_same_thread=False: de webapp-backend kan meerdere threads gebruiken.
+            kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+        _engine = create_engine(url, **kwargs)
+        _init_schema(_engine)
     return _engine
 
 
@@ -54,20 +122,21 @@ def get_known_paths():
 
 
 def upsert_case(case_id, filename, folder_path, page_count=None):
+    now = _now()
     with get_engine().begin() as conn:
         conn.execute(text("""
-            INSERT INTO cases (case_id, filename, folder_path, page_count)
-            VALUES (:cid, :fn, :fp, :pc)
+            INSERT INTO cases (case_id, filename, folder_path, page_count, intake_ts, updated_ts)
+            VALUES (:cid, :fn, :fp, :pc, :ts, :ts)
             ON CONFLICT (folder_path) DO NOTHING
-        """), {"cid": case_id, "fn": filename, "fp": folder_path, "pc": page_count})
+        """), {"cid": case_id, "fn": filename, "fp": folder_path, "pc": page_count, "ts": now})
 
 
 def set_case_status(case_id, status, used_ocr=None, page_count=None):
-    sets = ["status = :st", "updated_ts = now()"]
-    params = {"cid": case_id, "st": status}
+    sets = ["status = :st", "updated_ts = :uts"]
+    params = {"cid": case_id, "st": status, "uts": _now()}
     if used_ocr is not None:
         sets.append("used_ocr = :ocr")
-        params["ocr"] = bool(used_ocr)
+        params["ocr"] = 1 if used_ocr else 0
     if page_count is not None:
         sets.append("page_count = :pc")
         params["pc"] = int(page_count)
@@ -154,9 +223,9 @@ def update_redaction_decision(redaction_id, decision, reviewer):
     with get_engine().begin() as conn:
         conn.execute(text("""
             UPDATE redactions
-            SET decision = :dec, reviewer = :rev, decision_ts = now()
+            SET decision = :dec, reviewer = :rev, decision_ts = :dts
             WHERE redaction_id = :rid
-        """), {"dec": decision, "rev": reviewer, "rid": redaction_id})
+        """), {"dec": decision, "rev": reviewer, "dts": _now(), "rid": redaction_id})
 
 
 def add_human_redaction(case_id, box, reviewer):
@@ -168,12 +237,12 @@ def add_human_redaction(case_id, box, reviewer):
                entity_type, text_snippet, confidence, source, decision, reviewer, decision_ts)
             VALUES
               (:rid, :cid, :pg, :nx0, :ny0, :nx1, :ny1,
-               'HANDMATIG', NULL, 1.0, 'human', 'accepted', :rev, now())
+               'HANDMATIG', NULL, 1.0, 'human', 'accepted', :rev, :dts)
         """), {
             "rid": rid, "cid": case_id, "pg": int(box["page_no"]),
             "nx0": float(box["nx0"]), "ny0": float(box["ny0"]),
             "nx1": float(box["nx1"]), "ny1": float(box["ny1"]),
-            "rev": reviewer,
+            "rev": reviewer, "dts": _now(),
         })
     return rid
 
@@ -183,6 +252,7 @@ def add_human_redaction(case_id, box, reviewer):
 def log_audit(case_id, actor, action, details=""):
     with get_engine().begin() as conn:
         conn.execute(text("""
-            INSERT INTO audit_log (case_id, actor, action, details)
-            VALUES (:cid, :actor, :action, :details)
-        """), {"cid": case_id, "actor": actor, "action": action, "details": details})
+            INSERT INTO audit_log (case_id, actor, action, details, ts)
+            VALUES (:cid, :actor, :action, :details, :ts)
+        """), {"cid": case_id, "actor": actor, "action": action,
+               "details": details, "ts": _now()})

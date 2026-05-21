@@ -39,41 +39,36 @@ Recipes en de webapp draaien straks in deze omgeving.
 
 ---
 
-## Fase 2 — PostgreSQL-connectie
+## Fase 2 — Database: geen setup nodig (SQLite)
 
-1. **Administration** → **Connections** → **+ NEW CONNECTION** → **PostgreSQL**.
-2. Vul host, poort (5432), database, gebruiker, wachtwoord in. Naam bijv. `woo_postgres`.
-3. **TEST** → **CREATE**.
+Je hebt **geen database-server, connectie of admin-rechten** nodig. Het project
+gebruikt standaard een lokaal SQLite-bestand (`woo.db`) dat in de managed folder
+**`woo_state`** komt te staan (die maak je in Fase 6).
 
----
+- De tabellen (`cases`, `redactions`, `audit_log`) worden **automatisch** aangemaakt
+  bij het eerste gebruik door `woo/db.py`. Je hoeft `sql/01_schema.sql` dus niet
+  handmatig te draaien — dat bestand staat er alleen ter referentie.
+- Wil je later toch een eigen server (bijv. PostgreSQL)? Zet dan de project-variabele
+  `woo_db_url` (via **"..." → Variables**) op je connection-string; `db.py` gebruikt
+  die dan in plaats van SQLite.
 
-## Fase 3 — Database-tabellen aanmaken
-
-1. In je project: bovenin **</> Code** (of "Notebooks") → **Notebooks** →
-   **+ NEW NOTEBOOK** → **SQL** → kies connectie `woo_postgres`.
-2. Plak de inhoud van `sql/01_schema.sql` en voer uit (Run).
-3. Controleer dat de tabellen `cases`, `redactions` en `audit_log` bestaan.
-
----
-
-## Fase 4 — DB-URL als project-variabele
-
-De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
-
-1. Rechtsboven het **"..." (drie puntjes)** → **Variables**.
-2. Zet bij de **Global variables** (JSON):
-   ```json
-   { "woo_db_url": "postgresql://gebruiker:wachtwoord@host:5432/dbnaam" }
-   ```
-3. **SAVE**.
-
-> Let op: dit zet het wachtwoord in projectvariabelen (leesbaar voor projectleden).
-> Prima voor een leerproject; voor productie gebruik je user secrets / een
-> beheerde credential.
+> SQLite is perfect voor één reviewer die aan het leren is. Voor veel gelijktijdige
+> gebruikers stap je later over op een echte database-server.
 
 ---
 
-## Fase 5 — Project-library plaatsen
+## Fase 3 — Managed folders
+
+1. Ga naar de **Flow**.
+2. **+ DATASET** (of rechtsklik op het canvas) → kies **Folder / Managed folder**.
+   Kies een **lokale-filesystem-connectie** → naam **`00_intake`**.
+3. Herhaal voor **`90_published`** (de gelakte PDF's).
+4. Herhaal voor **`woo_state`** — hierin komt het SQLite-bestand `woo.db`.
+   (Gebruik ook hier de lokale filesystem; anders kan `db.py` het pad niet vinden.)
+
+---
+
+## Fase 4 — Project-library plaatsen
 
 1. Bovenin **</> Code** → **Libraries**.
 2. Open de map **`python/`** en maak daarin een map **`woo`**.
@@ -82,35 +77,27 @@ De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
 4. Test snel in een **Python notebook** (kies code env `woo-env`):
    ```python
    from woo import db
-   print(db.get_cases())   # geeft [] als nog leeg -> verbinding werkt
+   print(db.get_cases())   # maakt de tabellen aan en geeft [] -> alles werkt
    ```
+   Geen foutmelding = de SQLite-database in `woo_state` is aangemaakt.
 
 ---
 
-## Fase 6 — Managed folders
-
-1. Ga naar de **Flow**.
-2. **+ DATASET** (of rechtsklik op het canvas) → kies **Folder / Managed folder**.
-   Kies een connectie (bijv. de lokale filesystem) → naam **`00_intake`**.
-3. Herhaal voor **`90_published`**.
-
----
-
-## Fase 7 — De recipes bouwen
+## Fase 5 — De recipes bouwen
 
 > Stel bij elke recipe rechtsonder/Advanced de **code env** in op `woo-env`.
 
 ### Recipe 1 — Intake
 1. Klik in de Flow op folder **`00_intake`** → rechterpaneel **Actions** →
    onder *Code recipes* → **Python**.
-2. **Inputs:** `00_intake`. **Outputs:** maak een nieuw dataset **`intake_status`**
-   (managed, op `woo_postgres` of filesystem). Create recipe.
+2. **Inputs:** `00_intake`. **Outputs:** maak een nieuw managed dataset
+   **`intake_status`** (op de filesystem-connectie). Create recipe.
 3. Plak de inhoud van `recipes/recipe_01_intake.py`. **Run**.
 
 ### Recipe 2 — Verwerken (extractie + PII-detectie)
 1. Selecteer weer **`00_intake`** → **Python recipe**.
-2. **Inputs:** `00_intake`. **Outputs:** nieuw dataset **`process_status`**.
-3. Plak `recipes/recipe_02_process.py`. **Run** (na een test-PDF, zie Fase 9).
+2. **Inputs:** `00_intake`. **Outputs:** nieuw managed dataset **`process_status`**.
+3. Plak `recipes/recipe_02_process.py`. **Run** (na een test-PDF, zie Fase 7).
 
 ### Recipe 4 — Publiceren (batch, optioneel naast de webapp)
 1. Selecteer **`00_intake`** → **Python recipe**.
@@ -119,7 +106,7 @@ De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
 
 ---
 
-## Fase 8 — De webapp bouwen
+## Fase 6 — De webapp bouwen
 
 1. Bovenin **</> Code** → **Webapps** → **+ NEW WEBAPP** → **Code webapp** →
    **Standard (HTML / CSS / JS + Python backend)**. Naam bijv. `Woo Review`.
@@ -137,13 +124,14 @@ De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
 
 ---
 
-## Fase 9 — End-to-end testen
+## Fase 7 — End-to-end testen
 
 1. Open folder **`00_intake`** → **Upload your files** → upload een test-PDF
    (begin met een digitale PDF mét tekstlaag).
-2. **Run recipe 1** → in een SQL-notebook: `SELECT * FROM cases;` → status `NEW`.
-3. **Run recipe 2** → status wordt `READY_FOR_REVIEW`; `SELECT * FROM redactions;`
-   toont lak-kandidaten.
+2. **Run recipe 1** → controleer in een Python-notebook: `from woo import db;
+   print(db.get_cases())` → status `NEW`.
+3. **Run recipe 2** → status wordt `READY_FOR_REVIEW`; `db.get_redactions(case_id)`
+   toont de lak-kandidaten.
 4. Open de **webapp** → kies de case → controleer de vlakken (klik = aan/uit,
    sleep = zelf toevoegen) → **Goedkeuren & publiceren**.
 5. Open folder **`90_published`** → download het PDF → **probeer de gelakte tekst
@@ -151,7 +139,7 @@ De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
 
 ---
 
-## Fase 10 — Automatiseren (optioneel)
+## Fase 8 — Automatiseren (optioneel)
 
 1. Bovenin **Scenarios** → **+ NEW SCENARIO** → naam `Auto-intake`.
 2. **Trigger:** "Trigger on dataset/folder change" op `00_intake` (of op een tijd).
@@ -165,9 +153,10 @@ De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
 
 | Symptoom | Oorzaak / oplossing |
 |---|---|
-| `Geen database-URL gevonden` | Project-variabele `woo_db_url` ontbreekt (Fase 4). |
-| `ModuleNotFoundError: woo` | Library staat niet in `python/woo/` (Fase 5). |
+| `Kon geen database bepalen` | Managed folder `woo_state` ontbreekt of staat niet op de lokale filesystem (Fase 3). |
+| `ModuleNotFoundError: woo` | Library staat niet in `python/woo/` (Fase 4). |
 | `No module named presidio/fitz` | Recipe/webapp gebruikt niet code env `woo-env`. |
-| Webapp toont lege/zwarte viewer | PDF.js-CDN geblokkeerd → zelf hosten (Fase 8). |
+| Webapp toont lege/zwarte viewer | PDF.js-CDN geblokkeerd → zelf hosten (Fase 6). |
 | Geen kandidaten op een gescande PDF | OCR niet geïnstalleerd (Tesseract + `nld`, Fase 1.6). |
+| `database is locked` | Twee processen schrijven tegelijk in SQLite; probeer opnieuw of stap over op een DB-server. |
 | Vlakken staan verschoven | Niet aan de orde bij genormaliseerde coördinaten; check dat je `app.js`/`redact.py` niet hebt aangepast. |
