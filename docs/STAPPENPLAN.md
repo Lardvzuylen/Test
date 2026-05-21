@@ -1,0 +1,173 @@
+# Stappenplan: het Woo-lakproject bouwen in Dataiku
+
+Dit is het concrete "waar-klik-ik" plan. Menu-namen kunnen per Dataiku-versie
+licht verschillen; de volgorde en logica blijven gelijk. Reken op ~1-2 uur voor
+de eerste keer.
+
+> Voor je begint heb je nodig: toegang tot een Dataiku DSS-instance, een
+> PostgreSQL-database (host/poort/db/gebruiker/wachtwoord), en admin-rechten in
+> Dataiku om een code environment en connectie aan te maken (of iemand die dat
+> voor je doet).
+
+---
+
+## Fase 0 — Project aanmaken
+
+1. Ga naar de Dataiku homepage → **+ NEW PROJECT** → **Blank project**.
+2. Naam: bijv. `Woo Lakken`. Open het project.
+
+---
+
+## Fase 1 — Code environment (de Python-omgeving)
+
+Recipes en de webapp draaien straks in deze omgeving.
+
+1. Klik rechtsboven op het **tandwiel/Administration**-icoon → **Code Envs**.
+2. **+ NEW PYTHON ENV** → kies Python **3.10 of 3.11** → naam bijv. `woo-env` → maak aan.
+3. Open de env → tab **Packages to install** → plak de inhoud van
+   `code-env-requirements.txt`.
+4. Voeg op een eigen regel ook het **spaCy NL-model als wheel** toe (dit is de
+   betrouwbaarste manier in Dataiku; `spacy download` werkt hier niet vanzelf):
+   ```
+   https://github.com/explosion/spacy-models/releases/download/nl_core_news_lg-3.7.0/nl_core_news_lg-3.7.0-py3-none-any.whl
+   ```
+   (pas het versienummer aan op je geïnstalleerde spaCy.)
+5. Klik **SAVE AND UPDATE**. Wacht tot de build klaar is.
+6. **OCR (optioneel, voor gescande PDF's):** Tesseract + de taalpack `nld` moeten
+   als systeempakket op de DSS-node staan (`apt-get install tesseract-ocr tesseract-ocr-nld`).
+   Zonder OCR werken digitale PDF's prima; gescande niet.
+
+---
+
+## Fase 2 — PostgreSQL-connectie
+
+1. **Administration** → **Connections** → **+ NEW CONNECTION** → **PostgreSQL**.
+2. Vul host, poort (5432), database, gebruiker, wachtwoord in. Naam bijv. `woo_postgres`.
+3. **TEST** → **CREATE**.
+
+---
+
+## Fase 3 — Database-tabellen aanmaken
+
+1. In je project: bovenin **</> Code** (of "Notebooks") → **Notebooks** →
+   **+ NEW NOTEBOOK** → **SQL** → kies connectie `woo_postgres`.
+2. Plak de inhoud van `sql/01_schema.sql` en voer uit (Run).
+3. Controleer dat de tabellen `cases`, `redactions` en `audit_log` bestaan.
+
+---
+
+## Fase 4 — DB-URL als project-variabele
+
+De library `woo/db.py` leest de databaseverbinding uit een project-variabele.
+
+1. Rechtsboven het **"..." (drie puntjes)** → **Variables**.
+2. Zet bij de **Global variables** (JSON):
+   ```json
+   { "woo_db_url": "postgresql://gebruiker:wachtwoord@host:5432/dbnaam" }
+   ```
+3. **SAVE**.
+
+> Let op: dit zet het wachtwoord in projectvariabelen (leesbaar voor projectleden).
+> Prima voor een leerproject; voor productie gebruik je user secrets / een
+> beheerde credential.
+
+---
+
+## Fase 5 — Project-library plaatsen
+
+1. Bovenin **</> Code** → **Libraries**.
+2. Open de map **`python/`** en maak daarin een map **`woo`**.
+3. Maak in `python/woo/` de bestanden aan en plak de inhoud uit dit project:
+   `__init__.py`, `db.py`, `pdf_utils.py`, `pii.py`, `redact.py`.
+4. Test snel in een **Python notebook** (kies code env `woo-env`):
+   ```python
+   from woo import db
+   print(db.get_cases())   # geeft [] als nog leeg -> verbinding werkt
+   ```
+
+---
+
+## Fase 6 — Managed folders
+
+1. Ga naar de **Flow**.
+2. **+ DATASET** (of rechtsklik op het canvas) → kies **Folder / Managed folder**.
+   Kies een connectie (bijv. de lokale filesystem) → naam **`00_intake`**.
+3. Herhaal voor **`90_published`**.
+
+---
+
+## Fase 7 — De recipes bouwen
+
+> Stel bij elke recipe rechtsonder/Advanced de **code env** in op `woo-env`.
+
+### Recipe 1 — Intake
+1. Klik in de Flow op folder **`00_intake`** → rechterpaneel **Actions** →
+   onder *Code recipes* → **Python**.
+2. **Inputs:** `00_intake`. **Outputs:** maak een nieuw dataset **`intake_status`**
+   (managed, op `woo_postgres` of filesystem). Create recipe.
+3. Plak de inhoud van `recipes/recipe_01_intake.py`. **Run**.
+
+### Recipe 2 — Verwerken (extractie + PII-detectie)
+1. Selecteer weer **`00_intake`** → **Python recipe**.
+2. **Inputs:** `00_intake`. **Outputs:** nieuw dataset **`process_status`**.
+3. Plak `recipes/recipe_02_process.py`. **Run** (na een test-PDF, zie Fase 9).
+
+### Recipe 4 — Publiceren (batch, optioneel naast de webapp)
+1. Selecteer **`00_intake`** → **Python recipe**.
+2. **Inputs:** `00_intake`. **Outputs:** folder **`90_published`**.
+3. Plak `recipes/recipe_04_publish.py`.
+
+---
+
+## Fase 8 — De webapp bouwen
+
+1. Bovenin **</> Code** → **Webapps** → **+ NEW WEBAPP** → **Code webapp** →
+   **Standard (HTML / CSS / JS + Python backend)**. Naam bijv. `Woo Review`.
+2. Vul de tabs:
+   - **HTML** ← `webapp/body.html`
+   - **CSS** ← `webapp/style.css`
+   - **JavaScript** ← `webapp/app.js`
+   - **Python** ← `webapp/backend.py`
+3. Tab **Settings**: zet **Backend enabled** aan en kies **code env** `woo-env`.
+4. Klik **SAVE** en **START BACKEND** → open de **View**.
+
+> Blokkeert je netwerk de PDF.js-CDN? Dan laadt de viewer niet. Host `pdf.min.js`
+> en `pdf.worker.min.js` dan in een managed folder en pas de URL's in
+> `body.html` / `app.js` aan.
+
+---
+
+## Fase 9 — End-to-end testen
+
+1. Open folder **`00_intake`** → **Upload your files** → upload een test-PDF
+   (begin met een digitale PDF mét tekstlaag).
+2. **Run recipe 1** → in een SQL-notebook: `SELECT * FROM cases;` → status `NEW`.
+3. **Run recipe 2** → status wordt `READY_FOR_REVIEW`; `SELECT * FROM redactions;`
+   toont lak-kandidaten.
+4. Open de **webapp** → kies de case → controleer de vlakken (klik = aan/uit,
+   sleep = zelf toevoegen) → **Goedkeuren & publiceren**.
+5. Open folder **`90_published`** → download het PDF → **probeer de gelakte tekst
+   te selecteren/kopiëren**. Er mag niets onder het zwart vandaan komen. ✅
+
+---
+
+## Fase 10 — Automatiseren (optioneel)
+
+1. Bovenin **Scenarios** → **+ NEW SCENARIO** → naam `Auto-intake`.
+2. **Trigger:** "Trigger on dataset/folder change" op `00_intake` (of op een tijd).
+3. **Steps:** "Build / Run" → recipe 1, daarna recipe 2 (of build dataset
+   `process_status`, wat beide recipes triggert).
+4. Activeer het scenario. Nieuwe PDF's komen nu vanzelf op `READY_FOR_REVIEW`.
+
+---
+
+## Snelle probleemoplossing
+
+| Symptoom | Oorzaak / oplossing |
+|---|---|
+| `Geen database-URL gevonden` | Project-variabele `woo_db_url` ontbreekt (Fase 4). |
+| `ModuleNotFoundError: woo` | Library staat niet in `python/woo/` (Fase 5). |
+| `No module named presidio/fitz` | Recipe/webapp gebruikt niet code env `woo-env`. |
+| Webapp toont lege/zwarte viewer | PDF.js-CDN geblokkeerd → zelf hosten (Fase 8). |
+| Geen kandidaten op een gescande PDF | OCR niet geïnstalleerd (Tesseract + `nld`, Fase 1.6). |
+| Vlakken staan verschoven | Niet aan de orde bij genormaliseerde coördinaten; check dat je `app.js`/`redact.py` niet hebt aangepast. |
