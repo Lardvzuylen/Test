@@ -1,0 +1,44 @@
+/* Webapp CSS (Dataiku Standard webapp -> tab "CSS"). */
+#woo-app { display: flex; height: 100vh; font-family: system-ui, sans-serif; }
+
+#sidebar  { width: 240px; border-right: 1px solid #ddd; padding: 12px; overflow-y: auto; }
+#entities { width: 260px; border-left: 1px solid #ddd; padding: 12px; overflow-y: auto; }
+#main     { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+#sidebar h2, #entities h3 { margin: 0 0 8px; font-size: 15px; }
+#status-filter { width: 100%; margin-bottom: 10px; }
+
+#case-list { list-style: none; margin: 0; padding: 0; }
+#case-list li { padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#case-list li:hover { background: #f0f3f7; }
+
+#toolbar { display: flex; align-items: center; gap: 10px; padding: 10px;
+           border-bottom: 1px solid #ddd; background: #fafbfc; }
+#toolbar .spacer { flex: 1; }
+#case-title { font-weight: 600; }
+#toolbar input { margin-left: 4px; }
+
+button { padding: 6px 12px; border: 1px solid #ccc; border-radius: 4px;
+         background: #fff; cursor: pointer; }
+button.primary { background: #1b6ec2; color: #fff; border-color: #1b6ec2; }
+button:disabled { opacity: .5; cursor: default; }
+
+.badge { background: #e0a800; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.hidden { display: none; }
+
+#viewer { flex: 1; overflow: auto; background: #525659; padding: 20px;
+          display: flex; flex-direction: column; align-items: center; gap: 16px; }
+
+.page-wrap { position: relative; box-shadow: 0 2px 8px rgba(0,0,0,.4); background: #fff; }
+.page-wrap canvas { display: block; }
+.overlay { position: absolute; inset: 0; cursor: crosshair; }
+
+/* Lak-vlakken. 'on' = wordt gelakt, 'off' = afgewezen (alleen omlijning). */
+.rbox { position: absolute; box-sizing: border-box; }
+.rbox.on  { background: rgba(0,0,0,.78); }
+.rbox.off { background: transparent; border: 2px dashed #ff5b5b; }
+.rbox.human.on { background: rgba(20,40,120,.78); }
+.rbox:hover { outline: 2px solid #ffd000; }
+
+.entity-group { padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+.hint { color: #777; font-size: 12px; margin-top: 12px; }

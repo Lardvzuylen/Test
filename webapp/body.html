@@ -1,0 +1,36 @@
+<!-- Webapp HTML (Dataiku Standard webapp -> tab "HTML"). -->
+<!-- PDF.js via CDN. Als het netwerkbeleid externe CDN's blokkeert, host pdf.js
+     dan zelf in een managed folder en pas de src-paden hieronder aan. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<div id="woo-app">
+  <aside id="sidebar">
+    <h2>Cases</h2>
+    <select id="status-filter">
+      <option value="READY_FOR_REVIEW">Klaar voor review</option>
+      <option value="IN_REVIEW">In review</option>
+      <option value="PUBLISHED">Gepubliceerd</option>
+      <option value="">Alle</option>
+    </select>
+    <ul id="case-list"></ul>
+  </aside>
+
+  <main id="main">
+    <div id="toolbar">
+      <span id="case-title">Selecteer een case</span>
+      <span id="ocr-badge" class="badge hidden">OCR &mdash; extra opletten</span>
+      <span class="spacer"></span>
+      <label>Reviewer <input id="reviewer" type="text" placeholder="jouw naam"></label>
+      <button id="btn-save" disabled>Opslaan</button>
+      <button id="btn-approve" class="primary" disabled>Goedkeuren &amp; publiceren</button>
+    </div>
+    <div id="viewer"></div>
+  </main>
+
+  <aside id="entities">
+    <h3>Gevonden gegevens</h3>
+    <div id="entity-list"></div>
+    <p class="hint">Klik een vlak om aan/uit te zetten. Sleep op de pagina om zelf
+       een vlak toe te voegen.</p>
+  </aside>
+</div>
